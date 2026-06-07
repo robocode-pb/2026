@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portable Web IDE</title>
+    <!-- Inline SVG Favicon для localhost -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- JSZip для архівації -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Лоадер для Monaco Editor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>
+    <style>
+        body { background-color: #1e1e1e; color: #d4d4d4; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .vscode-sidebar { background-color: #252526; }
+        .vscode-editor { background-color: #1e1e1e; }
+        .active-file { background-color: #37373d; color: #ffffff; }
+        .context-menu { background-color: #252526; border: 1px solid #454545; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+        #monaco-anchor { width: 100%; height: 100%; overflow: hidden; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden select-none text-sm">
+
+    <!-- Контейнер для збереження стану (захищений Base64 формат) -->
+    <div id="saved-state" class="hidden" data-session=""></div>
+
+    <!-- Головний робочий простір -->
+    <div class="flex-1 flex overflow-hidden w-full relative" id="workspace">
+        
+        <!-- Ліва панель: Провідник файлів (Тепер містить і компактний заголовок) -->
+        <aside id="sidebar" class="w-64 vscode-sidebar border-r border-[#2b2b2b] flex flex-col transition-all duration-200 shrink-0">
+            <div class="p-3 border-b border-[#2b2b2b] space-y-2">
+                <div class="flex items-center gap-2 font-semibold text-white">
+                    <i data-lucide="code" class="w-4 h-4 text-blue-400"></i>
+                    <span>Portable IDE <span class="text-[10px] font-normal text-gray-400">Monaco</span></span>
+                </div>
+                <button onclick="downloadAllFiles()" class="w-full flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-2 py-1.5 rounded transition cursor-pointer text-xs font-medium shadow-sm">
+                    <i data-lucide="download-cloud" class="w-3.5 h-3.5"></i>
+                    <span>Завантажити ZIP (+Editor)</span>
+                </button>
+            </div>
+            
+            <div class="px-3 py-2 flex items-center justify-between text-[#aaaaaa] font-bold tracking-wide uppercase text-xs">
+                <span>Провідник</span>
+                <button onclick="createNewFilePrompt()" class="hover:text-white p-1 rounded hover:bg-[#37373d] cursor-pointer" title="Новий файл">
+                    <i data-lucide="file-plus" class="w-3.5 h-3.5"></i>
+                </button>
+            </div>
+            <div id="file-list" class="flex-1 overflow-y-auto p-1 space-y-0.5" onclick="hideContextMenu()">
+                <!-- Файли з'являться тут -->
+            </div>
+        </aside>
+
+        <!-- Центральна панель: Редактор коду Monaco -->
+        <main id="editor-container" class="flex-1 flex flex-col vscode-editor min-w-0 overflow-hidden relative">
+            <div class="h-9 bg-[#2d2d2d] flex items-center justify-between px-3 border-b border-[#2b2b2b] text-[#aaaaaa] shrink-0">
+                <div class="flex items-center gap-2 min-w-0">
+                    <button onclick="toggleSidebar()" class="hover:text-white p-1 rounded hover:bg-[#37373d] cursor-pointer shrink-0" title="Приховати/Показати провідник">
+                        <i data-lucide="menu" class="w-4 h-4"></i>
+                    </button>
+                    <span id="active-file-title" class="italic truncate">Завантаження редактора...</span>
+                </div>
+                
+                <!-- Панель інструментів швидкого керування Monaco всередині тайтла -->
+                <div class="flex items-center gap-3 text-xs shrink-0">
+                    <div class="flex items-center bg-[#1e1e1e] rounded border border-[#454545] overflow-hidden h-6">
+                        <button onclick="changeFontSize(-1)" class="px-2 hover:bg-[#37373d] text-gray-300 transition font-bold" title="Зменшити шрифт">-</button>
+                        <span id="font-size-indicator" class="px-1.5 text-[11px] text-gray-400 bg-[#2d2d2d] border-x border-[#454545] h-full flex items-center">15px</span>
+                        <button onclick="changeFontSize(1)" class="px-2 hover:bg-[#37373d] text-gray-300 transition font-bold" title="Збільшити шрифт">+</button>
+                    </div>
+                    <button id="wrap-toggle-btn" onclick="toggleWordWrap()" class="flex items-center gap-1 bg-[#3c3c3c] hover:bg-[#4a4a4a] px-2 h-6 rounded border border-[#454545] text-gray-300 transition cursor-pointer" title="Перенесення рядків">
+                        <i data-lucide="wrap-text" class="w-3.5 h-3.5"></i>
+                        <span>Wrap: Off</span>
+                    </button>
+                </div>
+            </div>
+            <div class="flex-1 relative bg-[#1e1e1e]">
+                <div id="monaco-anchor"></div>
+            </div>
+        </main>
+
+        <!-- Інтерактивний спліттер для зміни ширини прев'ю мишкою -->
+        <div id="resizer" class="w-1 bg-[#2b2b2b] hover:bg-blue-500 cursor-col-resize transition-colors h-full shrink-0"></div>
+
+        <!-- Права панель: Живе прев'ю -->
+        <section id="preview-container" class="border-l border-[#2b2b2b] flex flex-col bg-white overflow-hidden shrink-0" style="width: 35%;">
+            <div class="h-9 bg-[#2d2d2d] border-b border-[#2b2b2b] flex items-center justify-between px-3 text-[#aaaaaa] shrink-0">
+                <span class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider"><i data-lucide="eye" class="w-3.5 h-3.5"></i> Прев'ю</span>
+                <div class="flex items-center gap-2">
+                    <!-- Перемикач режимів релоаду -->
+                    <div class="flex items-center bg-[#1e1e1e] rounded border border-[#454545] p-0.5 text-[11px] h-6">
+                        <button id="mode-auto-btn" onclick="setPreviewMode('auto')" class="px-2 h-full rounded bg-blue-600 text-white font-medium transition cursor-pointer">Auto</button>
+                        <button id="mode-save-btn" onclick="setPreviewMode('save')" class="px-2 h-full rounded text-gray-400 font-medium transition cursor-pointer">Ctrl+S</button>
+                    </div>
+                    <button onclick="toggleMaximizePreview()" id="toggle-preview-btn" class="hover:text-white p-1 rounded hover:bg-[#37373d] cursor-pointer" title="Розгорнути прев'ю">
+                        <i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>
+                    </button>
+                </div>
+            </div>
+            <iframe id="preview-iframe" class="flex-1 w-full bg-white" sandbox="allow-scripts allow-modals"></iframe>
+        </section>
+    </div>
+
+    <!-- Контекстне меню -->
+    <div id="context-menu" class="context-menu hidden fixed z-50 rounded py-1 w-44 text-gray-300">
+        <button onclick="contextRename()" class="w-full text-left px-4 py-2 hover:bg-[#007acc] hover:text-white flex items-center gap-2 cursor-pointer">
+            <i data-lucide="edit-2" class="w-3.5 h-3.5"></i> Перейменувати
+        </button>
+        <button onclick="contextDelete()" class="w-full text-left px-4 py-2 hover:bg-rose-600 hover:text-white flex items-center gap-2 cursor-pointer text-rose-400">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Видалити
+        </button>
+        <div class="border-t border-[#454545] my-1"></div>
+        <button onclick="createNewFilePrompt()" class="w-full text-left px-4 py-2 hover:bg-[#37373d] flex items-center gap-2 cursor-pointer">
+            <i data-lucide="file-plus" class="w-3.5 h-3.5"></i> Новий файл
+        </button>
+    </div>
+
+    <!-- Кастомне модальне вікно -->
+    <div id="custom-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-[100] backdrop-blur-xs">
+        <div class="bg-[#252526] border border-[#454545] rounded-lg p-5 w-96 shadow-2xl flex flex-col gap-4">
+            <h3 id="modal-title" class="text-white font-semibold text-base">Увага</h3>
+            <div id="modal-body" class="text-gray-300 text-sm leading-relaxed"></div>
+            <div id="modal-input-container" class="hidden">
+                <input id="modal-input" type="text" class="w-full bg-[#3c3c3c] border border-[#555] rounded px-3 py-1.5 text-white focus:outline-none focus:border-blue-500 text-sm">
+            </div>
+            <div class="flex justify-end gap-2 mt-2">
+                <button id="modal-cancel-btn" class="px-4 py-1.5 rounded bg-[#3a3a3a] hover:bg-[#4a4a4a] text-gray-200 cursor-pointer transition text-xs font-medium">Скасувати</button>
+                <button id="modal-confirm-btn" class="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-white cursor-pointer transition text-xs font-medium">ОК</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Скрипт керування системою -->
+    <script>
+        var files = [];
+        var activeFileId = null;
+        var selectedContextMenuFileId = null;
+        var isPreviewMaximized = false;
+        var editorInstance = null; 
+        
+        // Стан додаткових опцій редактора
+        var currentFontSize = 15;
+        var isWordWrapOn = false;
+        var previewMode = 'auto'; // 'auto' або 'save'
+        var isSidebarHidden = false;
+
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var stateEl = document.getElementById('saved-state');
+            var savedData = stateEl ? stateEl.getAttribute('data-session') : '';
+
+            if (savedData && savedData.trim() !== '') {
+                try {
+                    files = JSON.parse(decodeURIComponent(escape(atob(savedData))));
+                } catch (e) {
+                    console.error('Помилка відновлення сесії:', e);
+                    loadDefaultTemplates();
+                }
+            } else {
+                loadDefaultTemplates();
+            }
+
+            require(['vs/editor/editor.main'], function() {
+                editorInstance = monaco.editor.create(document.getElementById('monaco-anchor'), {
+                    theme: 'vs-dark',
+                    automaticLayout: true,
+                    fontSize: currentFontSize,
+                    fontFamily: "'Fira Code', 'Courier New', monospace",
+                    minimap: { enabled: false }, // МІНІМАПУ ВИМКНЕНО
+                    tabSize: 4,
+                    wordWrap: 'off',
+                    renderWhitespace: 'selection',
+                    roundedSelection: true
+                });
+
+                // Глобальне перехоплення Ctrl+S всередині Monaco
+                editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
+                    handleManualSave();
+                });
+
+                files.forEach(function(file) {
+                    file.model = monaco.editor.createModel(file.content, getLanguageByExtension(file.name));
+                    file.model.onDidChangeContent(function() {
+                        file.content = file.model.getValue();
+                        if (previewMode === 'auto') {
+                            updatePreview();
+                        }
+                    });
+                });
+
+                renderFileList();
+                if (files.length > 0) selectFile(files[0].id);
+            });
+
+            // Глобальне перехоплення Ctrl+S на сторінці
+            window.addEventListener('keydown', function(e) {
+                if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                    e.preventDefault();
+                    handleManualSave();
+                }
+            });
+
+            initResizer();
+            lucide.createIcons();
+
+            document.addEventListener('click', function(e) { if (!e.target.closest('#context-menu')) hideContextMenu(); });
+            document.getElementById('sidebar').addEventListener('contextmenu', function(e) {
+                if (e.target.id === 'sidebar' || e.target.id === 'file-list') {
+                    e.preventDefault();
+                    showContextMenu(e.clientX, e.clientY, null);
+                }
+            });
+            document.getElementById('modal-input').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') document.getElementById('modal-confirm-btn').click();
+            });
+        });
+
+        // Обробник ручного збереження (Ctrl+S)
+        function handleManualSave() {
+            files.forEach(function(f) {
+                if (f.model) f.content = f.model.getValue();
+            });
+            updatePreview();
+            
+            // Легка візуальна нотифікація у тайтлі
+            var titleEl = document.getElementById('active-file-title');
+            var oldText = titleEl.textContent;
+            titleEl.textContent = "✓ Збережено та оновлено прев'ю";
+            setTimeout(function() { titleEl.textContent = oldText; }, 1000);
+        }
+
+        // Логіка перетягування спліттера мишкою
+        function initResizer() {
+            var resizer = document.getElementById('resizer');
+            var preview = document.getElementById('preview-container');
+            var workspace = document.getElementById('workspace');
+            var isResizing = false;
+
+            resizer.addEventListener('mousedown', function(e) {
+                isResizing = true;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!isResizing) return;
+                var workspaceWidth = workspace.clientWidth;
+                var previewWidth = workspaceWidth - e.clientX;
+
+                // Обмеження мінімального та максимального розміру
+                if (previewWidth > 150 && previewWidth < workspaceWidth * 0.8) {
+                    preview.style.width = previewWidth + 'px';
+                }
+            });
+
+            document.addEventListener('mouseup', function() {
+                if (isResizing) {
+                    isResizing = false;
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    if (editorInstance) editorInstance.layout();
+                }
+            });
+        }
+
+        function changeFontSize(direction) {
+            currentFontSize += direction;
+            if (currentFontSize < 10) currentFontSize = 10;
+            if (currentFontSize > 30) currentFontSize = 30;
+            document.getElementById('font-size-indicator').textContent = currentFontSize + 'px';
+            if (editorInstance) {
+                editorInstance.updateOptions({ fontSize: currentFontSize });
+            }
+        }
+
+        function toggleWordWrap() {
+            isWordWrapOn = !isWordWrapOn;
+            var btn = document.getElementById('wrap-toggle-btn');
+            if (isWordWrapOn) {
+                btn.innerHTML = '<i data-lucide="wrap-text" class="w-3.5 h-3.5 text-blue-400"></i><span>Wrap: On</span>';
+                if (editorInstance) editorInstance.updateOptions({ wordWrap: 'on' });
+            } else {
+                btn.innerHTML = '<i data-lucide="wrap-text" class="w-3.5 h-3.5"></i><span>Wrap: Off</span>';
+                if (editorInstance) editorInstance.updateOptions({ wordWrap: 'off' });
+            }
+            lucide.createIcons();
+        }
+
+        function setPreviewMode(mode) {
+            previewMode = mode;
+            var autoBtn = document.getElementById('mode-auto-btn');
+            var saveBtn = document.getElementById('mode-save-btn');
+
+            if (mode === 'auto') {
+                autoBtn.className = "px-2 h-full rounded bg-blue-600 text-white font-medium transition cursor-pointer";
+                saveBtn.className = "px-2 h-full rounded text-gray-400 font-medium transition cursor-pointer";
+                updatePreview();
+            } else {
+                saveBtn.className = "px-2 h-full rounded bg-blue-600 text-white font-medium transition cursor-pointer";
+                autoBtn.className = "px-2 h-full rounded text-gray-400 font-medium transition cursor-pointer";
+            }
+        }
+
+        function toggleSidebar() {
+            isSidebarHidden = !isSidebarHidden;
+            var sidebar = document.getElementById('sidebar');
+            if (isSidebarHidden) {
+                sidebar.style.display = 'none';
+            } else {
+                sidebar.style.display = 'flex';
+            }
+            if (editorInstance) editorInstance.layout();
+        }
+
+        function getLanguageByExtension(filename) {
+            var ext = filename.split('.').pop().toLowerCase();
+            if (ext === 'html' || ext === 'htm') return 'html';
+            if (ext === 'css') return 'css';
+            if (ext === 'js') return 'javascript';
+            if (ext === 'json') return 'json';
+            return 'plaintext';
+        }
+
+        function showModal({ title, body, type = 'alert', defaultValue = '' }) {
+            return new Promise(function(resolve) {
+                var modal = document.getElementById('custom-modal');
+                var titleEl = document.getElementById('modal-title');
+                var bodyEl = document.getElementById('modal-body');
+                var inputContainer = document.getElementById('modal-input-container');
+                var inputEl = document.getElementById('modal-input');
+                var cancelBtn = document.getElementById('modal-cancel-btn');
+                var confirmBtn = document.getElementById('modal-confirm-btn');
+
+                titleEl.textContent = title;
+                bodyEl.textContent = body || '';
+                
+                if (type === 'prompt') {
+                    inputContainer.classList.remove('hidden');
+                    inputEl.value = defaultValue;
+                    setTimeout(function() { inputEl.focus(); inputEl.select(); }, 50);
+                } else {
+                    inputContainer.classList.add('hidden');
+                }
+
+                cancelBtn.classList.toggle('hidden', type === 'alert');
+
+                function handleConfirm() { cleanup(); resolve(type === 'prompt' ? inputEl.value : true); }
+                function handleCancel() { cleanup(); resolve(type === 'prompt' ? null : false); }
+                function cleanup() {
+                    confirmBtn.removeEventListener('click', handleConfirm);
+                    cancelBtn.removeEventListener('click', handleCancel);
+                    modal.classList.add('hidden');
+                }
+
+                confirmBtn.addEventListener('click', handleConfirm);
+                cancelBtn.addEventListener('click', handleCancel);
+                modal.classList.remove('hidden');
+            });
+        }
+
+        function loadDefaultTemplates() {
+            var htmlLines = [
+                '<!DOCTYPE html>',
+                '<html lang="uk">',
+                '<head>',
+                '    <meta charset="UTF-8">',
+                '    <link rel="stylesheet" href="style.css">',
+                '</head>',
+                '<body>',
+                '    <div class="container">',
+                '        <h1>Ваш портативний редактор 🚀</h1>',
+                '        <p>Підсвітка коду та автодоповнення від Monaco (VS Code Core) активовані!</p>',
+                '        <button class="action-btn" onclick="sayHello()">Натисни мене</button>',
+                '    </div>',
+                '    <script src="script.js"><' + '/script>',
+                '</body>',
+                '</html>'
+            ];
+
+            var cssLines = [
+                'body {',
+                '    background: linear-gradient(135deg, #1e1e2f 0%, #252542 100%);',
+                '    color: #ffffff;',
+                '    font-family: system-ui, -apple-system, sans-serif;',
+                '    display: flex;',
+                '    justify-content: center;',
+                '    align-items: center;',
+                '    height: 100vh;',
+                '    margin: 0;',
+                '}',
+                '.container {',
+                '    background: rgba(255, 255, 255, 0.05);',
+                '    border: 1px solid rgba(255, 255, 255, 0.1);',
+                '    padding: 2.5rem;',
+                '    border-radius: 12px;',
+                '    text-align: center;',
+                '    box-shadow: 0 10px 30px rgba(0,0,0,0.3);',
+                '}',
+                'h1 { color: #60a5fa; margin-top: 0; }',
+                '.action-btn {',
+                '    background: #3b82f6;',
+                '    color: white;',
+                '    border: none;',
+                '    padding: 10px 20px;',
+                '    border-radius: 6px;',
+                '    font-weight: 600;',
+                '    cursor: pointer;',
+                '    transition: background 0.2s;',
+                '}',
+                '.action-btn:hover { background: #2563eb; }'
+            ];
+
+            var jsLines = [
+                'function sayHello() {',
+                '    alert("Привіт! Логіка JavaScript успішно працює в прев\'ю через Monaco!");',
+                '}'
+            ];
+
+            files = [
+                { id: '1', name: 'index.html', content: htmlLines.join('\n') },
+                { id: '2', name: 'style.css', content: cssLines.join('\n') },
+                { id: '3', name: 'script.js', content: jsLines.join('\n') }
+            ];
+        }
+
+        function renderFileList() {
+            var listContainer = document.getElementById('file-list');
+            listContainer.innerHTML = '';
+
+            files.forEach(function(file) {
+                var fileEl = document.createElement('div');
+                fileEl.className = 'flex items-center justify-between px-3 py-2 rounded cursor-pointer transition ' + 
+                    (file.id === activeFileId ? 'active-file' : 'hover:bg-[#2a2a2b] text-[#bbbbbb]');
+                
+                var iconName = 'file-text';
+                if (file.name.endsWith('.html')) iconName = 'file-code';
+                if (file.name.endsWith('.css')) iconName = 'braces';
+                if (file.name.endsWith('.js')) iconName = 'file-json';
+
+                fileEl.innerHTML = '<div class="flex items-center gap-2 truncate flex-1">' +
+                    '<i data-lucide="' + iconName + '" class="w-4 h-4 flex-shrink-0 text-blue-400"></i>' +
+                    '<span class="truncate">' + file.name + '</span>' +
+                    '</div>';
+
+                fileEl.addEventListener('click', function() { selectFile(file.id); });
+                fileEl.addEventListener('contextmenu', function(e) {
+                    e.preventDefault();
+                    showContextMenu(e.clientX, e.clientY, file.id);
+                });
+
+                listContainer.appendChild(fileEl);
+            });
+            lucide.createIcons();
+        }
+
+        function selectFile(id) {
+            var file = files.find(function(f) { return f.id === id; });
+            if (!file || !editorInstance) return;
+
+            activeFileId = id;
+            document.getElementById('active-file-title').textContent = file.name;
+            editorInstance.setModel(file.model);
+
+            renderFileList();
+            updatePreview();
+        }
+
+        function updatePreview() {
+            var iframe = document.getElementById('preview-iframe');
+            var htmlFile = files.find(function(f) { return f.name === 'index.html'; });
+            var html = htmlFile ? htmlFile.content : '';
+
+            var cssFile = files.find(function(f) { return f.name === 'style.css'; });
+            var cssContent = cssFile ? cssFile.content : '';
+
+            var jsFile = files.find(function(f) { return f.name === 'script.js'; });
+            var jsContent = jsFile ? jsFile.content : '';
+
+            var linkStyleRegex = /<link[^>]*href=["']style\.css["'][^>]*>/gi;
+            if (linkStyleRegex.test(html)) {
+                html = html.replace(linkStyleRegex, '<style>' + cssContent + '</style>');
+            } else {
+                if (html.includes('</head>')) {
+                    html = html.replace('</head>', '<style>' + cssContent + '</style></head>');
+                } else {
+                    html = '<style>' + cssContent + '</style>' + html;
+                }
+            }
+
+            var scriptSrcRegex = /<script[^>]*src=["']script\.js["'][^>]*>\s*<\/script>/gi;
+            if (scriptSrcRegex.test(html)) {
+                html = html.replace(scriptSrcRegex, '<script>' + jsContent + '</' + 'script>');
+            } else {
+                var scriptTagHtml = '<script>' + jsContent + '</' + 'script>';
+                if (html.includes('</body>')) {
+                    html = html.replace('</body>', scriptTagHtml + '</body>');
+                } else {
+                    html = html + scriptTagHtml;
+                }
+            }
+
+            iframe.srcdoc = html || '<div style="font-family:sans-serif;padding:20px;color:#888;text-align:center;">Створіть index.html для прев\'ю</div>';
+        }
+
+        function showContextMenu(x, y, fileId) {
+            var menu = document.getElementById('context-menu');
+            selectedContextMenuFileId = fileId;
+            menu.style.left = x + 'px';
+            menu.style.top = y + 'px';
+            menu.classList.remove('hidden');
+        }
+
+        function hideContextMenu() { document.getElementById('context-menu').classList.add('hidden'); }
+
+        async function createNewFilePrompt() {
+            hideContextMenu();
+            var name = await showModal({
+                title: 'Створити новий файл',
+                body: 'Введіть назву файлу разом із розширенням:',
+                type: 'prompt'
+            });
+            if (!name) return;
+
+            if (files.some(function(f) { return f.name.toLowerCase() === name.toLowerCase(); })) {
+                await showModal({ title: 'Помилка', body: 'Файл з такою назвою вже існує!' });
+                return;
+            }
+
+            var newId = Date.now().toString();
+            var newModel = monaco.editor.createModel('', getLanguageByExtension(name));
+            var newFile = { id: newId, name: name, content: '', model: newModel };
+            
+            newModel.onDidChangeContent(function() {
+                newFile.content = newModel.getValue();
+                if (previewMode === 'auto') updatePreview();
+            });
+
+            files.push(newFile);
+            renderFileList();
+            selectFile(newId);
+        }
+
+        async function contextRename() {
+            hideContextMenu();
+            if (!selectedContextMenuFileId) return;
+            var file = files.find(function(f) { return f.id === selectedContextMenuFileId; });
+            if (!file) return;
+
+            var newName = await showModal({
+                title: 'Перейменувати файл',
+                body: 'Введіть нову назву:',
+                type: 'prompt',
+                defaultValue: file.name
+            });
+            if (!newName || newName === file.name) return;
+
+            if (files.some(function(f) { return f.name.toLowerCase() === newName.toLowerCase() && f.id !== file.id; })) {
+                await showModal({ title: 'Помилка', body: 'Файл з такою назвою вже існує!' });
+                return;
+            }
+
+            file.name = newName;
+            monaco.editor.setModelLanguage(file.model, getLanguageByExtension(newName));
+
+            if (activeFileId === file.id) {
+                document.getElementById('active-file-title').textContent = newName;
+            }
+            renderFileList();
+            updatePreview();
+        }
+
+        async function contextDelete() {
+            hideContextMenu();
+            if (!selectedContextMenuFileId) return;
+            var file = files.find(function(f) { return f.id === selectedContextMenuFileId; });
+            if (!file) return;
+
+            var confirmDelete = await showModal({
+                title: 'Видалити файл?',
+                body: 'Ви впевнені, що хочете видалити ' + file.name + '?',
+                type: 'confirm'
+            });
+            if (!confirmDelete) return;
+
+            if (file.model) file.model.dispose();
+            files = files.filter(function(f) { return f.id !== selectedContextMenuFileId; });
+            
+            if (activeFileId === selectedContextMenuFileId) {
+                if (files.length > 0) {
+                    selectFile(files[0].id);
+                } else {
+                    activeFileId = null;
+                    document.getElementById('active-file-title').textContent = 'Файл не вибрано';
+                    if (editorInstance) editorInstance.setModel(null);
+                    updatePreview();
+                }
+            }
+            renderFileList();
+        }
+
+        function toggleMaximizePreview() {
+            isPreviewMaximized = !isPreviewMaximized;
+            var editor = document.getElementById('editor-container');
+            var preview = document.getElementById('preview-container');
+            var resizer = document.getElementById('resizer');
+            var btn = document.getElementById('toggle-preview-btn');
+
+            if (isPreviewMaximized) {
+                if (!isSidebarHidden) toggleSidebar();
+                editor.style.display = 'none';
+                resizer.style.display = 'none';
+                preview.style.width = '100%';
+                btn.innerHTML = '<i data-lucide="minimize-2" class="w-3.5 h-3.5"></i>';
+            } else {
+                if (isSidebarHidden) toggleSidebar();
+                editor.style.display = 'flex';
+                resizer.style.display = 'block';
+                preview.style.width = '35%';
+                btn.innerHTML = '<i data-lucide="maximize-2" class="w-3.5 h-3.5"></i>';
+            }
+            lucide.createIcons();
+            setTimeout(function() { if (editorInstance) editorInstance.layout(); }, 100);
+        }
+
+        function downloadAllFiles() {
+            if (files.length === 0) {
+                showModal({ title: 'Інфо', body: 'Немає файлів для завантаження.' });
+                return;
+            }
+            var zip = new JSZip();
+            
+            // 1. Записуємо чисті вихідні файли коду користувача в ZIP
+            files.forEach(function(file) {
+                if (file.model) file.content = file.model.getValue();
+                zip.file(file.name, file.content);
+            });
+            
+            // 2. Генеруємо повноцінну копію самої IDE (editor.html) з цими ж файлами всередині
+            var stateStorage = document.getElementById('saved-state');
+            var cleanFiles = files.map(function(f) {
+                return { id: f.id, name: f.name, content: f.content };
+            });
+            var jsonString = JSON.stringify(cleanFiles);
+            var b64String = btoa(unescape(encodeURIComponent(jsonString)));
+            
+            stateStorage.setAttribute('data-session', b64String);
+            var fullHtml = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+            
+            // Записуємо editor.html в ZIP
+            zip.file('editor.html', fullHtml);
+            
+            zip.generateAsync({ type: 'blob' }).then(function(content) {
+                var url = URL.createObjectURL(content);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'project_with_editor.zip';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+    </script>
+</body>
+</html>
