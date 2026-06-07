@@ -9,20 +9,13 @@
         .disabled { opacity: 0.3; pointer-events: none; filter: grayscale(1); }
         .hint { background: #fff3cd; color: #856404; padding: 12px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #ffeeba; font-size: 14px; }
         
-        #log { height: 150px; overflow-y: scroll; background: #222; color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; text-align: left; border-radius: 8px; margin: 20px auto; width: 80%; max-width: 400px; }
+        /* Іконка */
+        .icon { width: 30px; height: 30px; vertical-align: middle; fill: #007bff; margin-right: 10px; }
         
-        .controls { 
-            display: grid; 
-            grid-template-columns: repeat(3, 80px); 
-            grid-template-rows: repeat(3, 80px); 
-            gap: 10px; 
-            justify-content: center; 
-            margin: 20px auto; 
-        }
-        .controls button { 
-            width: 80px; height: 80px; border-radius: 15px; border: none; background: #007bff; 
-            color: white; font-size: 24px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.2); 
-        }
+        #log { height: 120px; overflow-y: scroll; background: #222; color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; text-align: left; border-radius: 8px; margin: 15px auto; width: 80%; max-width: 400px; }
+        
+        .controls { display: grid; grid-template-columns: repeat(3, 80px); grid-template-rows: repeat(3, 80px); gap: 10px; justify-content: center; margin: 15px auto; }
+        .controls button { width: 80px; height: 80px; border-radius: 15px; border: none; background: #007bff; color: white; font-size: 24px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
         .controls button:active { background: #0056b3; }
         .btn-up { grid-column: 2; grid-row: 1; }
         .btn-left { grid-column: 1; grid-row: 2; }
@@ -30,17 +23,22 @@
         .btn-right { grid-column: 3; grid-row: 2; }
         .btn-down { grid-column: 2; grid-row: 3; }
         
-        .speed-control { margin: 20px auto; width: 200px; }
-        .link { margin-top: 20px; display: block; color: #007bff; font-weight: bold; }
+        .speed-control { margin: 15px auto; width: 200px; }
+        .link { display: block; margin-top: 15px; color: #007bff; font-weight: bold; text-decoration: none; padding: 10px; background: #e9ecef; border-radius: 8px; }
     </style>
 </head>
 <body>
 
+    <h1>
+        <svg class="icon" viewBox="0 0 24 24"><path d="M14.36,12l3.43-3.43c0.29-0.29,0.29-0.77,0-1.06L12.59,2.2c-0.39-0.39-1.02-0.39-1.41,0L6.63,7.56 c-0.29,0.29-0.29,0.77,0,1.06L10.06,12l-3.43,3.43c-0.29,0.29-0.29,0.77,0,1.06l4.55,4.55c0.39,0.39,1.02,0.39,1.41,0l5.2-5.2 c0.29-0.29,0.29-0.77,0-1.06L14.36,12z M11,4.41l3.59,3.59L11,11.59V4.41z M11,19.59l-3.59-3.59L11,12.41V19.59z"/></svg>
+        Leo Robot
+    </h1>
+
     <div id="hintBox" class="hint">
-        <b>Підключення:</b> З'єднайте HC-05 (пароль: 1234), натисніть кнопку нижче.
+        <b>Підключення:</b> З'єднайте HC-05 (пароль: 1234) в налаштуваннях BT, натисніть кнопку.
     </div>
 
-    <button id="connectBtn" onclick="connectSerial()" style="padding: 15px 30px; font-size: 16px; border-radius: 10px; border: none; background: #28a745; color: white; cursor: pointer;">Підключити Serial</button>
+    <button id="connectBtn" onclick="connectSerial()" style="padding: 12px 24px; border-radius: 10px; border: none; background: #28a745; color: white; cursor: pointer;">Підключити Serial</button>
 
     <div id="panel" class="disabled">
         <div id="log"><strong>📥 Лог:</strong><br></div>
@@ -61,7 +59,7 @@
             <button class="btn-down" onmousedown="sendCommand('b')" onmouseup="sendCommand('s')" ontouchstart="sendCommand('b')" ontouchend="sendCommand('s')">↓</button>
         </div>
 
-        <a href="https://wokwi.com/projects/466167753546181633" target="_blank" class="link">Тут код для машинки ЛЕО</a>
+        <a href="https://wokwi.com/projects/466167753546181633" target="_blank" class="link">Код для машинки ЛЕО (Wokwi)</a>
     </div>
 
     <script>
@@ -102,7 +100,7 @@
 
         function updateSpeed(val) {
             speedVal.innerText = val;
-            sendCommand(val); // Авто-відправка швидкості
+            sendCommand(val);
         }
 
         async function sendCommand(cmd) {
