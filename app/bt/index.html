@@ -105,7 +105,7 @@
 
         async function sendCommand(cmd) {
             if (writer) {
-                await writer.write(new TextEncoder().encode(cmd + "\n"));
+                await writer.write(new TextEncoder().encode(cmd));
                 log("➡️ " + cmd);
             }
         }
